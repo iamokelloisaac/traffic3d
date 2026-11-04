@@ -86,6 +86,8 @@ cmake --build . -j
 kitty ./traffic3d
 ```
 
+After running the app for first time on wsl windows, enlarge its screen to full and quit. Then relaunch so that to correct the glitches
+
 ---
 
 ## 📖 User Manual: How It Works
