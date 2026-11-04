@@ -83,7 +83,7 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 cmake --build . -j
 
 # 5. Run the simulation
-./traffic3d
+kitty ./traffic3d
 ```
 
 ---
