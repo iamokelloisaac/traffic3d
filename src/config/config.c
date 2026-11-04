@@ -24,6 +24,7 @@
 void config_defaults(config_t* cfg) {
     *cfg = (config_t){
         .pedestrian_call_delay_seconds = 2.0,
+        .queued_call_delay_seconds     = 10.0, /* Default 10s wait */
         .queue_cool_off_seconds        = 30.0,
         .allow_mid_walk_join           = true,
         .min_crossing_time_seconds     = 5.0,
@@ -169,6 +170,7 @@ static bool parse_color(const char* val, uint32_t* out) {
 static bool config_set(config_t* cfg, const char* k, const char* v) {
     /* Timings */
     TRY_DOUBLE("pedestrian_call_delay_seconds", pedestrian_call_delay_seconds)
+    TRY_DOUBLE("queued_call_delay_seconds",     queued_call_delay_seconds)
     TRY_DOUBLE("queue_cool_off_seconds",        queue_cool_off_seconds)
     TRY_BOOL  ("allow_mid_walk_join",           allow_mid_walk_join)
     TRY_DOUBLE("min_crossing_time_seconds",     min_crossing_time_seconds)
