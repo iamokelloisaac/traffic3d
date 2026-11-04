@@ -1,7 +1,9 @@
 /*
- * main.c — Entry point. Phase 5: Bringing the world to life.
+ * main.c — Entry point. Phase 5: Agents, logic fixes, and HUD.
  *
- * Commit: fix(main): spawn 30 cars in a stream and remove wheel flip glitch
+ * Commit: fix(main): correct scope of state machine variables and fix penguin update
+ *
+ * Depends on: everything.
  */
 #include "traffic3d/common.h"
 #include "traffic3d/config.h"
@@ -26,98 +28,99 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
-/* ── Procedural Meshes for Agents ────────────────────────────── */
+/* ── 5x7 Pixel Font for the HUD ─────────────────────────────── */
+static const uint8_t FONT[][5] = {
+    {0x00,0x00,0x00,0x00,0x00}, /* Space */
+    {0x7C,0x12,0x11,0x12,0x7C}, /* A */
+    {0x7F,0x49,0x49,0x49,0x36}, /* B */
+    {0x3E,0x41,0x41,0x41,0x22}, /* C */
+    {0x7F,0x41,0x41,0x22,0x1C}, /* D */
+    {0x7F,0x49,0x49,0x49,0x41}, /* E */
+    {0x7F,0x09,0x09,0x09,0x01}, /* F */
+    {0x3E,0x41,0x49,0x49,0x7A}, /* G */
+    {0x7F,0x08,0x08,0x08,0x7F}, /* H */
+    {0x00,0x41,0x7F,0x41,0x00}, /* I */
+    {0x20,0x40,0x41,0x3F,0x01}, /* J */
+    {0x7F,0x08,0x14,0x22,0x41}, /* K */
+    {0x7F,0x40,0x40,0x40,0x40}, /* L */
+    {0x7F,0x02,0x0C,0x02,0x7F}, /* M */
+    {0x7F,0x04,0x08,0x10,0x7F}, /* N */
+    {0x3E,0x41,0x41,0x41,0x3E}, /* O */
+    {0x7F,0x09,0x09,0x09,0x06}, /* P */
+    {0x3E,0x41,0x51,0x21,0x5E}, /* Q */
+    {0x7F,0x09,0x19,0x29,0x46}, /* R */
+    {0x46,0x49,0x49,0x49,0x31}, /* S */
+    {0x01,0x01,0x7F,0x01,0x01}, /* T */
+    {0x3F,0x40,0x40,0x40,0x3F}, /* U */
+    {0x1F,0x20,0x40,0x20,0x1F}, /* V */
+    {0x3F,0x40,0x38,0x40,0x3F}, /* W */
+    {0x63,0x14,0x08,0x14,0x63}, /* X */
+    {0x07,0x08,0x70,0x08,0x07}, /* Y */
+    {0x61,0x51,0x49,0x45,0x43}  /* Z */
+};
 
-/* Creates a low-poly car mesh using boxes. Flatter and wider. */
-static mesh_t* create_car_mesh(uint32_t color) {
-    mesh_t* m = mesh_create();
+static void draw_text(framebuffer_t* fb, int x, int y, const char* text, uint32_t color, int scale) {
+    int cursor_x = x;
+    for (int i = 0; text[i] != '\0'; i++) {
+        char c = text[i];
+        int idx = -1;
+        if (c >= 'A' && c <= 'Z') idx = (c - 'A') + 1;
+        else if (c == ' ') idx = 0;
 
-    /* Main Body */
-    vec3_t b = vec3(0,0,0);
-    vec3_t size = vec3(1.8f, 0.6f, 3.8f);
-    vec3_t v000 = vec3(b.x-size.x/2, b.y-size.y/2, b.z-size.z/2);
-    vec3_t v001 = vec3(b.x-size.x/2, b.y-size.y/2, b.z+size.z/2);
-    vec3_t v010 = vec3(b.x-size.x/2, b.y+size.y/2, b.z-size.z/2);
-    vec3_t v011 = vec3(b.x-size.x/2, b.y+size.y/2, b.z+size.z/2);
-    vec3_t v100 = vec3(b.x+size.x/2, b.y-size.y/2, b.z-size.z/2);
-    vec3_t v101 = vec3(b.x+size.x/2, b.y-size.y/2, b.z+size.z/2);
-    vec3_t v110 = vec3(b.x+size.x/2, b.y+size.y/2, b.z-size.z/2);
-    vec3_t v111 = vec3(b.x+size.x/2, b.y+size.y/2, b.z+size.z/2);
-
-    mesh_add_triangle(m, v001, v011, v111, color); mesh_add_triangle(m, v001, v111, v101, color);
-    mesh_add_triangle(m, v100, v110, v010, color); mesh_add_triangle(m, v100, v010, v000, color);
-    mesh_add_triangle(m, v010, v110, v111, color); mesh_add_triangle(m, v010, v111, v011, color);
-    mesh_add_triangle(m, v000, v001, v101, color); mesh_add_triangle(m, v000, v101, v100, color);
-    mesh_add_triangle(m, v000, v010, v011, color); mesh_add_triangle(m, v000, v011, v001, color);
-    mesh_add_triangle(m, v101, v111, v110, color); mesh_add_triangle(m, v101, v110, v100, color);
-
-    /* Roof / Cabin */
-    float cx = 1.4f, cy = 0.5f, cz = 2.0f;
-    vec3_t r000 = vec3(b.x-cx/2, b.y+size.y/2, b.z-cz/2);
-    vec3_t r001 = vec3(b.x-cx/2, b.y+size.y/2, b.z+cz/2);
-    vec3_t r010 = vec3(b.x-cx/2, b.y+size.y/2+cy, b.z-cz/2);
-    vec3_t r011 = vec3(b.x-cx/2, b.y+size.y/2+cy, b.z+cz/2);
-    vec3_t r100 = vec3(b.x+cx/2, b.y+size.y/2, b.z-cz/2);
-    vec3_t r101 = vec3(b.x+cx/2, b.y+size.y/2, b.z+cz/2);
-    vec3_t r110 = vec3(b.x+cx/2, b.y+size.y/2+cy, b.z-cz/2);
-    vec3_t r111 = vec3(b.x+cx/2, b.y+size.y/2+cy, b.z+cz/2);
-
-    uint32_t glass = 0x111820;
-    /* Windshield & Windows */
-    mesh_add_triangle(m, r001, r011, r111, glass); mesh_add_triangle(m, r001, r111, r101, glass);
-    mesh_add_triangle(m, r100, r110, r010, glass); mesh_add_triangle(m, r100, r010, r000, glass);
-    mesh_add_triangle(m, r010, r110, r111, color); mesh_add_triangle(m, r010, r111, r011, color);
-    mesh_add_triangle(m, r000, r010, r011, glass); mesh_add_triangle(m, r000, r011, r001, glass);
-    mesh_add_triangle(m, r101, r111, r110, glass); mesh_add_triangle(m, r101, r110, r100, glass);
-
-    mesh_finalize(m);
-    return m;
+        if (idx >= 0) {
+            for (int col = 0; col < 5; col++) {
+                uint8_t bits = FONT[idx][col];
+                for (int row = 0; row < 7; row++) {
+                    if (bits & (1 << row)) {
+                        for (int sy = 0; sy < scale; sy++) {
+                            for (int sx = 0; sx < scale; sx++) {
+                                framebuffer_put(fb, cursor_x + col * scale + sx, y + row * scale + sy, color);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        cursor_x += 6 * scale;
+    }
 }
 
-/* Creates a tiny penguin mesh (body, belly, beak) */
-static mesh_t* create_penguin_mesh(personality_t p) {
+/* ── Procedural Meshes ────────────────────────────────────────── */
+static mesh_t* create_car_mesh(uint32_t color) {
     mesh_t* m = mesh_create();
-    float s = p.size;
-    vec3_t b = vec3(0,0,0);
-    vec3_t size = vec3(0.6f*s, 1.2f*s, 0.5f*s);
-    vec3_t v000 = vec3(b.x-size.x/2, b.y-size.y/2, b.z-size.z/2);
-    vec3_t v001 = vec3(b.x-size.x/2, b.y-size.y/2, b.z+size.z/2);
-    vec3_t v010 = vec3(b.x-size.x/2, b.y+size.y/2, b.z-size.z/2);
-    vec3_t v011 = vec3(b.x-size.x/2, b.y+size.y/2, b.z+size.z/2);
-    vec3_t v100 = vec3(b.x+size.x/2, b.y-size.y/2, b.z-size.z/2);
-    vec3_t v101 = vec3(b.x+size.x/2, b.y-size.y/2, b.z+size.z/2);
-    vec3_t v110 = vec3(b.x+size.x/2, b.y+size.y/2, b.z-size.z/2);
-    vec3_t v111 = vec3(b.x+size.x/2, b.y+size.y/2, b.z+size.z/2);
+    vec3_t b = vec3(0,0,0), size = vec3(1.8f, 0.6f, 3.8f);
+    vec3_t v000 = vec3(b.x-size.x/2, b.y-size.y/2, b.z-size.z/2), v001 = vec3(b.x-size.x/2, b.y-size.y/2, b.z+size.z/2), v010 = vec3(b.x-size.x/2, b.y+size.y/2, b.z-size.z/2), v011 = vec3(b.x-size.x/2, b.y+size.y/2, b.z+size.z/2);
+    vec3_t v100 = vec3(b.x+size.x/2, b.y-size.y/2, b.z-size.z/2), v101 = vec3(b.x+size.x/2, b.y-size.y/2, b.z+size.z/2), v110 = vec3(b.x+size.x/2, b.y+size.y/2, b.z-size.z/2), v111 = vec3(b.x+size.x/2, b.y+size.y/2, b.z+size.z/2);
+    mesh_add_triangle(m, v001, v011, v111, color); mesh_add_triangle(m, v001, v111, v101, color); mesh_add_triangle(m, v100, v110, v010, color); mesh_add_triangle(m, v100, v010, v000, color);
+    mesh_add_triangle(m, v010, v110, v111, color); mesh_add_triangle(m, v010, v111, v011, color); mesh_add_triangle(m, v000, v001, v101, color); mesh_add_triangle(m, v000, v101, v100, color);
+    mesh_add_triangle(m, v000, v010, v011, color); mesh_add_triangle(m, v000, v011, v001, color); mesh_add_triangle(m, v101, v111, v110, color); mesh_add_triangle(m, v101, v110, v100, color);
+    float cx = 1.4f, cy = 0.5f, cz = 2.0f;
+    vec3_t r000 = vec3(b.x-cx/2, b.y+size.y/2, b.z-cz/2), r001 = vec3(b.x-cx/2, b.y+size.y/2, b.z+cz/2), r010 = vec3(b.x-cx/2, b.y+size.y/2+cy, b.z-cz/2), r011 = vec3(b.x-cx/2, b.y+size.y/2+cy, b.z+cz/2);
+    vec3_t r100 = vec3(b.x+cx/2, b.y+size.y/2, b.z-cz/2), r101 = vec3(b.x+cx/2, b.y+size.y/2, b.z+cz/2), r110 = vec3(b.x+cx/2, b.y+size.y/2+cy, b.z-cz/2), r111 = vec3(b.x+cx/2, b.y+size.y/2+cy, b.z+cz/2);
+    uint32_t glass = 0x111820;
+    mesh_add_triangle(m, r001, r011, r111, glass); mesh_add_triangle(m, r001, r111, r101, glass); mesh_add_triangle(m, r100, r110, r010, glass); mesh_add_triangle(m, r100, r010, r000, glass);
+    mesh_add_triangle(m, r010, r110, r111, color); mesh_add_triangle(m, r010, r111, r011, color); mesh_add_triangle(m, r000, r010, r011, glass); mesh_add_triangle(m, r000, r011, r001, glass); mesh_add_triangle(m, r101, r111, r110, glass); mesh_add_triangle(m, r101, r110, r100, glass);
+    mesh_finalize(m); return m;
+}
 
-    mesh_add_triangle(m, v001, v011, v111, p.body_color); mesh_add_triangle(m, v001, v111, v101, p.body_color);
-    mesh_add_triangle(m, v100, v110, v010, p.body_color); mesh_add_triangle(m, v100, v010, v000, p.body_color);
-    mesh_add_triangle(m, v010, v110, v111, p.body_color); mesh_add_triangle(m, v010, v111, v011, p.body_color);
-    mesh_add_triangle(m, v000, v001, v101, p.body_color); mesh_add_triangle(m, v000, v101, v100, p.body_color);
-    mesh_add_triangle(m, v000, v010, v011, p.body_color); mesh_add_triangle(m, v000, v011, v001, p.body_color);
-    mesh_add_triangle(m, v101, v111, v110, p.body_color); mesh_add_triangle(m, v101, v110, v100, p.body_color);
-
-    float z_front = size.z/2 + 0.01f;
-    float bw = 0.4f*s, bh = 0.8f*s;
-    vec3_t w1 = vec3(-bw/2, -bh/2, z_front);
-    vec3_t w2 = vec3( bw/2, -bh/2, z_front);
-    vec3_t w3 = vec3( bw/2,  bh/2, z_front);
-    vec3_t w4 = vec3(-bw/2,  bh/2, z_front);
-    mesh_add_triangle(m, w1, w2, w3, p.belly_color);
-    mesh_add_triangle(m, w1, w3, w4, p.belly_color);
-
+static mesh_t* create_penguin_mesh(personality_t p) {
+    mesh_t* m = mesh_create(); float s = p.size; vec3_t b = vec3(0,0,0), size = vec3(0.6f*s, 1.2f*s, 0.5f*s);
+    vec3_t v000 = vec3(b.x-size.x/2, b.y-size.y/2, b.z-size.z/2), v001 = vec3(b.x-size.x/2, b.y-size.y/2, b.z+size.z/2), v010 = vec3(b.x-size.x/2, b.y+size.y/2, b.z-size.z/2), v011 = vec3(b.x-size.x/2, b.y+size.y/2, b.z+size.z/2);
+    vec3_t v100 = vec3(b.x+size.x/2, b.y-size.y/2, b.z-size.z/2), v101 = vec3(b.x+size.x/2, b.y-size.y/2, b.z+size.z/2), v110 = vec3(b.x+size.x/2, b.y+size.y/2, b.z-size.z/2), v111 = vec3(b.x+size.x/2, b.y+size.y/2, b.z+size.z/2);
+    mesh_add_triangle(m, v001, v011, v111, p.body_color); mesh_add_triangle(m, v001, v111, v101, p.body_color); mesh_add_triangle(m, v100, v110, v010, p.body_color); mesh_add_triangle(m, v100, v010, v000, p.body_color);
+    mesh_add_triangle(m, v010, v110, v111, p.body_color); mesh_add_triangle(m, v010, v111, v011, p.body_color); mesh_add_triangle(m, v000, v001, v101, p.body_color); mesh_add_triangle(m, v000, v101, v100, p.body_color);
+    mesh_add_triangle(m, v000, v010, v011, p.body_color); mesh_add_triangle(m, v000, v011, v001, p.body_color); mesh_add_triangle(m, v101, v111, v110, p.body_color); mesh_add_triangle(m, v101, v110, v100, p.body_color);
+    float z_front = size.z/2 + 0.01f, bw = 0.4f*s, bh = 0.8f*s;
+    vec3_t w1 = vec3(-bw/2, -bh/2, z_front), w2 = vec3( bw/2, -bh/2, z_front), w3 = vec3( bw/2,  bh/2, z_front), w4 = vec3(-bw/2,  bh/2, z_front);
+    mesh_add_triangle(m, w1, w2, w3, p.belly_color); mesh_add_triangle(m, w1, w3, w4, p.belly_color);
     float by = size.y/2 + 0.05f;
-    vec3_t bk1 = vec3(-0.1f*s, by, z_front);
-    vec3_t bk2 = vec3( 0.1f*s, by, z_front);
-    vec3_t bk3 = vec3( 0.0f,   by, z_front + 0.3f*s);
-    mesh_add_triangle(m, bk1, bk2, bk3, 0xFFAA00);
-
-    mesh_finalize(m);
-    return m;
+    vec3_t bk1 = vec3(-0.1f*s, by, z_front), bk2 = vec3( 0.1f*s, by, z_front), bk3 = vec3( 0.0f,   by, z_front + 0.3f*s);
+    mesh_add_triangle(m, bk1, bk2, bk3, 0xFFAA00); mesh_finalize(m); return m;
 }
 
 /* ── Sky & Rendering ─────────────────────────────────────────── */
-
 static void fill_sky(framebuffer_t* fb, const config_t* cfg) {
     for (int y = 0; y < fb->height; ++y) {
         float t = (float)y / (float)(fb->height - 1);
@@ -126,7 +129,9 @@ static void fill_sky(framebuffer_t* fb, const config_t* cfg) {
         float r = r0 + (r1 - r0) * t, g = g0 + (g1 - g0) * t, b = b0 + (b1 - b0) * t;
         float d = t - 0.62f, glow = expf(-d * d * 60.0f) * 0.4f;
         r += ((cfg->color_horizon_glow >> 16) & 0xFF) * glow; g += ((cfg->color_horizon_glow >>  8) & 0xFF) * glow; b += ( cfg->color_horizon_glow        & 0xFF) * glow;
-        if (r > 255.0f) r = 255.0f; if (g > 255.0f) g = 255.0f; if (b > 255.0f) b = 255.0f;
+        if (r > 255.0f) r = 255.0f;
+        if (g > 255.0f) g = 255.0f;
+        if (b > 255.0f) b = 255.0f;
         uint32_t px = rgba_pack((uint8_t)r, (uint8_t)g, (uint8_t)b, 0xFF);
         uint32_t* row = &fb->pixels[(size_t)y * (size_t)fb->width];
         for (int x = 0; x < fb->width; ++x) row[x] = px;
@@ -142,7 +147,6 @@ static void render_object(framebuffer_t* fb, const mat4_t* vp, const object_t* o
     model = mat4_mul(model, mat4_rotate_x(obj->rotation.x));
     model = mat4_mul(model, mat4_scale(obj->scale));
     mat4_t mvp = mat4_mul(*vp, model);
-
     for (size_t i = 0; i < obj->mesh->count; ++i) {
         const triangle_t* tri = &obj->mesh->tris[i];
         vec4_t wa = mat4_mul_vec4(model, vec4_from_vec3(tri->a, 1.0f)), wb = mat4_mul_vec4(model, vec4_from_vec3(tri->b, 1.0f)), wc = mat4_mul_vec4(model, vec4_from_vec3(tri->c, 1.0f));
@@ -161,75 +165,38 @@ static void render_object(framebuffer_t* fb, const mat4_t* vp, const object_t* o
 /* ── Main ────────────────────────────────────────────────────── */
 int main(void) {
     if (!terminal_init()) return 1;
-    config_t cfg;
-    if (!config_load(&cfg, "config/default.conf")) config_defaults(&cfg);
+    config_t cfg; if (!config_load(&cfg, "config/default.conf")) config_defaults(&cfg);
 
-    int base_w = 0, base_h = 0;
-    terminal_framebuffer_size(&base_w, &base_h);
-    const int SSAA = 2;
-    framebuffer_t* fb = framebuffer_create(base_w * SSAA, base_h * SSAA);
+    int base_w = 0, base_h = 0; terminal_framebuffer_size(&base_w, &base_h);
+    const int SSAA = 2; framebuffer_t* fb = framebuffer_create(base_w * SSAA, base_h * SSAA);
     if (!fb) { terminal_shutdown(); return 1; }
 
-    scene_t scene;
-    scene_init(&scene);
+    scene_t scene; scene_init(&scene);
+    mesh_t* road = road_mesh_create(&cfg); scene_add(&scene, object_make(road, vec3_zero(), vec3_zero(), vec3(1,1,1)));
+    size_t light_idx = scene.count; mesh_t* light_mesh = light_mesh_create(LIGHT_GREEN, LIGHT_RED, &cfg); scene_add(&scene, object_make(light_mesh, vec3(10.0f, 0, 8.0f), vec3_zero(), vec3(1,1,1)));
 
-    mesh_t* road = road_mesh_create(&cfg);
-    scene_add(&scene, object_make(road, vec3_zero(), vec3_zero(), vec3(1,1,1)));
-
-    size_t light_idx = scene.count;
-    mesh_t* light_mesh = light_mesh_create(LIGHT_GREEN, LIGHT_RED, &cfg);
-    scene_add(&scene, object_make(light_mesh, vec3(10.0f, 0, 8.0f), vec3_zero(), vec3(1,1,1)));
-
-    /*
-     * SPAWN A STREAM OF CARS
-     * We spawn 30 cars, spaced out along the Z axis.
-     */
-    const int NUM_CARS = 30;
-    car_agent_t cars[NUM_CARS];
-
+    const int NUM_CARS = 30; car_agent_t cars[NUM_CARS];
     for (int i = 0; i < NUM_CARS; i++) {
         int lane = (i % 2 == 0) ? -1 : 1;
-
-        /* Space them out: cars in lane 1 start at -80 and go to +80.
-           cars in lane -1 start at +80 and go to -80. */
-        float start_z = 0.0f;
-        if (lane == 1) {
-            start_z = -80.0f + (float)(i / 2) * 10.0f;
-        } else {
-            start_z = 80.0f - (float)(i / 2) * 10.0f;
-        }
-
-        mesh_t* cm = create_car_mesh(0); /* temp */
-        size_t idx = scene.count;
-        scene_add(&scene, object_make(cm, vec3_zero(), vec3_zero(), vec3(1,1,1)));
-
+        float start_z = (lane == 1) ? -80.0f + (float)(i / 2) * 10.0f : 80.0f - (float)(i / 2) * 10.0f;
+        mesh_t* cm = create_car_mesh(0); size_t idx = scene.count; scene_add(&scene, object_make(cm, vec3_zero(), vec3_zero(), vec3(1,1,1)));
         car_agent_init(&cars[i], lane, start_z, idx, &cfg, i * 1337);
-
-        mesh_destroy(cm);
-        cm = create_car_mesh(cars[i].color);
-        scene.objects[idx].mesh = cm;
-        scene.objects[idx].position = cars[i].position;
+        mesh_destroy(cm); cm = create_car_mesh(cars[i].color); scene.objects[idx].mesh = cm; scene.objects[idx].position = cars[i].position;
     }
 
-    /* Spawn Penguins */
-    const int NUM_PENGUINS = 15;
-    penguin_agent_t penguins[NUM_PENGUINS];
+    const int NUM_PENGUINS = 15; penguin_agent_t penguins[NUM_PENGUINS];
     for (int i = 0; i < NUM_PENGUINS; i++) {
         int dir = (i % 2 == 0) ? 1 : -1;
         penguin_agent_init(&penguins[i], dir, 0, &cfg, i * 7331);
-
-        mesh_t* pm = create_penguin_mesh(penguins[i].personality);
-        size_t idx = scene.count;
-        scene_add(&scene, object_make(pm, penguins[i].position, vec3_zero(), vec3(1,1,1)));
-        penguins[i].object_index = idx;
+        mesh_t* pm = create_penguin_mesh(penguins[i].personality); size_t idx = scene.count;
+        scene_add(&scene, object_make(pm, penguins[i].position, vec3_zero(), vec3(1,1,1))); penguins[i].object_index = idx;
     }
 
     traffic_sm_t sm;
     traffic_sm_init(&sm);
 
     camera_t cam = camera_make(vec3(25.0f, 20.0f, 45.0f), vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 1.0f, 0.0f), 45.0f * (3.14159265f / 180.0f), 0.1f, 150.0f);
-    lighting_t light = lighting_default();
-    light.ambient = 0.35f;
+    lighting_t light = lighting_default(); light.ambient = 0.35f;
 
     const double target_dt = 1.0 / 30.0;
     double last = timing_now_seconds();
@@ -239,36 +206,37 @@ int main(void) {
     while (running) {
         unsigned key = terminal_poll_key();
         if (key == (unsigned)cfg.key_quit || key == 'q' || key == 27) running = false;
-        if (key == (unsigned)cfg.key_pedestrian_call) traffic_sm_press_button(&sm, &cfg);
 
+        /* Scope Fix: Declare now/dt BEFORE using them in press_button */
         double now = timing_now_seconds();
-        double dt = now - last; if (dt > 0.25) dt = 0.25; last = now;
+        double dt = now - last;
+        if (dt > 0.25) dt = 0.25;
+        last = now;
+
+        if (key == (unsigned)cfg.key_pedestrian_call) {
+            traffic_sm_press_button(&sm, &cfg, now);
+        }
 
         traffic_sm_update(&sm, dt, &cfg);
 
         light_state_t v_state = traffic_sm_get_vehicle_light(&sm, &cfg);
         light_state_t p_state = traffic_sm_get_pedestrian_light(&sm, &cfg);
-
         if (v_state != last_v_state || p_state != last_p_state) {
-            mesh_destroy(light_mesh);
-            light_mesh = light_mesh_create(v_state, p_state, &cfg);
-            scene.objects[light_idx].mesh = light_mesh;
-            last_v_state = v_state;
-            last_p_state = p_state;
+            mesh_destroy(light_mesh); light_mesh = light_mesh_create(v_state, p_state, &cfg);
+            scene.objects[light_idx].mesh = light_mesh; last_v_state = v_state; last_p_state = p_state;
         }
 
-        /* Update Cars (passing the whole array for queue logic) */
         for (int i = 0; i < NUM_CARS; i++) {
             car_agent_update(&cars[i], cars, NUM_CARS, dt, v_state, &cfg);
             scene.objects[cars[i].object_index].position = cars[i].position;
-            /* REMOVED the rotation.x = wheel_rotation to stop the flipping! */
         }
 
-        /* Update Penguins */
+        /* Update Penguins with the strict walk phase check */
+        bool is_walk_phase = (sm.current_phase == PHASE_PED_WALK);
         for (int i = 0; i < NUM_PENGUINS; i++) {
-            penguin_agent_update(&penguins[i], dt, p_state);
-            scene.objects[penguins[i].object_index].position = penguins[i].position;
+            penguin_agent_update(&penguins[i], dt, is_walk_phase);
 
+            scene.objects[penguins[i].object_index].position = penguins[i].position;
             float waddle = sinf(penguins[i].waddle_phase) * penguins[i].personality.waddle_amplitude;
             scene.objects[penguins[i].object_index].rotation.y = waddle;
 
@@ -280,24 +248,52 @@ int main(void) {
         fill_sky(fb, &cfg);
         framebuffer_clear_depth(fb);
 
-        float aspect = (float)(base_w * SSAA) / (float)(base_h * SSAA);
-        mat4_t vp = camera_view_projection(&cam, aspect);
+        /* --- Draw Giant HUD Text --- */
+        uint32_t bright_green = rgba_pack(0, 255, 0, 255);
+        uint32_t bright_yellow = rgba_pack(255, 255, 0, 255);
+        uint32_t bright_red = rgba_pack(255, 0, 0, 255);
 
-        for (size_t i = 0; i < scene.count; ++i) {
-            render_object(fb, &vp, &scene.objects[i], &light, base_w * SSAA, base_h * SSAA);
+        uint32_t v_color = bright_red;
+        uint32_t p_color = bright_red;
+        const char* v_text = "VEHICLE RED";
+        const char* p_text = "PEDESTRIAN RED";
+
+        if (sm.current_phase == PHASE_STEADY_GREEN) {
+            v_text = "VEHICLE GREEN"; v_color = bright_green;
+        } else if (sm.current_phase == PHASE_VEH_GREEN_TO_YELLOW) {
+            v_text = "VEHICLE FLASHING YELLOW"; v_color = bright_yellow;
+        } else if (sm.current_phase == PHASE_VEH_YELLOW_STEADY) {
+            v_text = "VEHICLE YELLOW"; v_color = bright_yellow;
+        } else if (sm.current_phase == PHASE_VEH_RED_TO_GREEN) {
+            v_text = "VEHICLE FLASHING GREEN"; v_color = bright_green;
+        } else if (sm.current_phase == PHASE_PED_WALK) {
+            p_text = "PEDESTRIAN GREEN"; p_color = bright_green;
+        } else if (sm.current_phase == PHASE_PED_BLINK) {
+            p_text = "PEDESTRIAN FLASHING GREEN"; p_color = bright_green;
+        } else if (sm.current_phase == PHASE_PED_RED_TO_GREEN) {
+            p_text = "PEDESTRIAN FLASHING GREEN"; p_color = bright_green;
         }
 
-        terminal_present(fb);
+        int scale = 2;
+        int margin = 2 * SSAA;
+        draw_text(fb, margin, margin, v_text, v_color, scale);
+        draw_text(fb, margin, margin + 10 * scale, p_text, p_color, scale);
 
+        if (sm.queued_call) {
+            draw_text(fb, margin, margin + 20 * scale, "CALL QUEUED...", bright_yellow, scale);
+        }
+
+        float aspect = (float)(base_w * SSAA) / (float)(base_h * SSAA);
+        mat4_t vp = camera_view_projection(&cam, aspect);
+        for (size_t i = 0; i < scene.count; ++i) render_object(fb, &vp, &scene.objects[i], &light, base_w * SSAA, base_h * SSAA);
+
+        terminal_present(fb);
         double spent = timing_now_seconds() - now;
         if (spent < target_dt) timing_sleep_seconds(target_dt - spent);
     }
 
-    mesh_destroy(road);
-    mesh_destroy(light_mesh);
+    mesh_destroy(road); mesh_destroy(light_mesh);
     for (int i = 0; i < NUM_CARS; i++) mesh_destroy(scene.objects[cars[i].object_index].mesh);
     for (int i = 0; i < NUM_PENGUINS; i++) mesh_destroy(scene.objects[penguins[i].object_index].mesh);
-    framebuffer_destroy(fb);
-    terminal_shutdown();
-    return 0;
+    framebuffer_destroy(fb); terminal_shutdown(); return 0;
 }
