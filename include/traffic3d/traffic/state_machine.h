@@ -24,11 +24,13 @@ typedef struct {
     double elapsed_in_phase;
     bool pedestrian_call_pending;
     bool queued_call;
+    double last_press_time;     /* For debouncing the button */
 } traffic_sm_t;
 
 void traffic_sm_init(traffic_sm_t* sm);
 void traffic_sm_update(traffic_sm_t* sm, double dt, const config_t* cfg);
-void traffic_sm_press_button(traffic_sm_t* sm, const config_t* cfg);
+/* User presses 'P'. Applies the mid-crossing queue logic and debounce. */
+void traffic_sm_press_button(traffic_sm_t* sm, const config_t* cfg, double current_time);
 light_state_t traffic_sm_get_vehicle_light(const traffic_sm_t* sm, const config_t* cfg);
 light_state_t traffic_sm_get_pedestrian_light(const traffic_sm_t* sm, const config_t* cfg);
 
