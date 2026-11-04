@@ -22,6 +22,7 @@
 typedef struct {
     /* ── PEDESTRIAN CALL ───────────────────────────────── */
     double pedestrian_call_delay_seconds;     /* button → yellow begins */
+    double queued_call_delay_seconds;         /* wait time after green before queued call fires */
     double queue_cool_off_seconds;            /* queued call wait */
     bool   allow_mid_walk_join;
     double min_crossing_time_seconds;         /* slowest crossing */
