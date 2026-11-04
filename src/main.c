@@ -1,7 +1,7 @@
 /*
- * main.c — Entry point. Phase 5: Agents, logic fixes, and HUD.
+ * main.c — Entry point. Phase 6: Final HUD polish with pixel-art icons.
  *
- * Commit: fix(main): correct scope of state machine variables and fix penguin update
+ * Commit: fix(main): render 3D scene before HUD to prevent ground occlusion
  *
  * Depends on: everything.
  */
@@ -30,7 +30,7 @@
 #include <math.h>
 #include <string.h>
 
-/* ── 5x7 Pixel Font for the HUD ─────────────────────────────── */
+/* ── 5x7 Pixel Font for the Text HUD ─────────────────────────── */
 static const uint8_t FONT[][5] = {
     {0x00,0x00,0x00,0x00,0x00}, /* Space */
     {0x7C,0x12,0x11,0x12,0x7C}, /* A */
@@ -61,6 +61,37 @@ static const uint8_t FONT[][5] = {
     {0x61,0x51,0x49,0x45,0x43}  /* Z */
 };
 
+/* ── 12x12 Pixel Icons for the Giant HUD ────────────────────── */
+static const char* ICON_CAR[] = {
+    "............",
+    "...XXXXXX...",
+    "..XXXXXXXX..",
+    ".XXXXXXXXXX.",
+    "XXXXXXXXXXXX",
+    "XXXXXXXXXXXX",
+    "XX.XXXXXX.XX",
+    "XX.XXXXXX.XX",
+    "............",
+    "............",
+    "............",
+    "............"
+};
+
+static const char* ICON_PENGUIN[] = {
+    "....XXXX....",
+    "...XXXXXX...",
+    "..XXXXXXXX..",
+    "..XXXXXXXX..",
+    "..XXXXXXXX..",
+    "...XXXXXX...",
+    "...XXXXXX...",
+    "...XXXXXX...",
+    "...XX..XX...",
+    "...XX..XX...",
+    "............",
+    "............"
+};
+
 static void draw_text(framebuffer_t* fb, int x, int y, const char* text, uint32_t color, int scale) {
     int cursor_x = x;
     for (int i = 0; text[i] != '\0'; i++) {
@@ -84,6 +115,28 @@ static void draw_text(framebuffer_t* fb, int x, int y, const char* text, uint32_
             }
         }
         cursor_x += 6 * scale;
+    }
+}
+
+static void draw_icon(framebuffer_t* fb, int x, int y, const char** icon, uint32_t color, int scale) {
+    for (int row = 0; row < 12; row++) {
+        for (int col = 0; col < 12; col++) {
+            if (icon[row][col] == 'X') {
+                for (int sy = 0; sy < scale; sy++) {
+                    for (int sx = 0; sx < scale; sx++) {
+                        framebuffer_put(fb, x + col * scale + sx, y + row * scale + sy, color);
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void draw_rect(framebuffer_t* fb, int x, int y, int w, int h, uint32_t color) {
+    for (int j = 0; j < h; j++) {
+        for (int i = 0; i < w; i++) {
+            framebuffer_put(fb, x + i, y + j, color);
+        }
     }
 }
 
@@ -207,7 +260,6 @@ int main(void) {
         unsigned key = terminal_poll_key();
         if (key == (unsigned)cfg.key_quit || key == 'q' || key == 27) running = false;
 
-        /* Scope Fix: Declare now/dt BEFORE using them in press_button */
         double now = timing_now_seconds();
         double dt = now - last;
         if (dt > 0.25) dt = 0.25;
@@ -231,24 +283,24 @@ int main(void) {
             scene.objects[cars[i].object_index].position = cars[i].position;
         }
 
-        /* Update Penguins with the strict walk phase check */
         bool is_walk_phase = (sm.current_phase == PHASE_PED_WALK);
         for (int i = 0; i < NUM_PENGUINS; i++) {
             penguin_agent_update(&penguins[i], dt, is_walk_phase);
-
             scene.objects[penguins[i].object_index].position = penguins[i].position;
             float waddle = sinf(penguins[i].waddle_phase) * penguins[i].personality.waddle_amplitude;
             scene.objects[penguins[i].object_index].rotation.y = waddle;
-
-            if (fabsf(penguins[i].position.x) > 25.0f) {
-                penguin_agent_init(&penguins[i], (i % 2 == 0) ? 1 : -1, penguins[i].object_index, &cfg, (uint32_t)(now * 1000.0f) + i);
-            }
+            if (fabsf(penguins[i].position.x) > 25.0f) penguin_agent_init(&penguins[i], (i % 2 == 0) ? 1 : -1, penguins[i].object_index, &cfg, (uint32_t)(now * 1000.0f) + i);
         }
 
         fill_sky(fb, &cfg);
         framebuffer_clear_depth(fb);
 
-        /* --- Draw Giant HUD Text --- */
+        /* --- Render 3D Scene FIRST --- */
+        float aspect = (float)(base_w * SSAA) / (float)(base_h * SSAA);
+        mat4_t vp = camera_view_projection(&cam, aspect);
+        for (size_t i = 0; i < scene.count; ++i) render_object(fb, &vp, &scene.objects[i], &light, base_w * SSAA, base_h * SSAA);
+
+        /* --- Draw Text HUD OVER THE 3D SCENE --- */
         uint32_t bright_green = rgba_pack(0, 255, 0, 255);
         uint32_t bright_yellow = rgba_pack(255, 255, 0, 255);
         uint32_t bright_red = rgba_pack(255, 0, 0, 255);
@@ -258,34 +310,47 @@ int main(void) {
         const char* v_text = "VEHICLE RED";
         const char* p_text = "PEDESTRIAN RED";
 
-        if (sm.current_phase == PHASE_STEADY_GREEN) {
-            v_text = "VEHICLE GREEN"; v_color = bright_green;
-        } else if (sm.current_phase == PHASE_VEH_GREEN_TO_YELLOW) {
-            v_text = "VEHICLE FLASHING YELLOW"; v_color = bright_yellow;
-        } else if (sm.current_phase == PHASE_VEH_YELLOW_STEADY) {
-            v_text = "VEHICLE YELLOW"; v_color = bright_yellow;
-        } else if (sm.current_phase == PHASE_VEH_RED_TO_GREEN) {
-            v_text = "VEHICLE FLASHING GREEN"; v_color = bright_green;
-        } else if (sm.current_phase == PHASE_PED_WALK) {
-            p_text = "PEDESTRIAN GREEN"; p_color = bright_green;
-        } else if (sm.current_phase == PHASE_PED_BLINK) {
-            p_text = "PEDESTRIAN FLASHING GREEN"; p_color = bright_green;
-        } else if (sm.current_phase == PHASE_PED_RED_TO_GREEN) {
-            p_text = "PEDESTRIAN FLASHING GREEN"; p_color = bright_green;
-        }
+        if (sm.current_phase == PHASE_STEADY_GREEN) { v_text = "VEHICLE GREEN"; v_color = bright_green; }
+        else if (sm.current_phase == PHASE_VEH_GREEN_TO_YELLOW) { v_text = "VEHICLE FLASHING YELLOW"; v_color = bright_yellow; }
+        else if (sm.current_phase == PHASE_VEH_YELLOW_STEADY) { v_text = "VEHICLE YELLOW"; v_color = bright_yellow; }
+        else if (sm.current_phase == PHASE_VEH_RED_TO_GREEN) { v_text = "VEHICLE FLASHING GREEN"; v_color = bright_green; }
+        else if (sm.current_phase == PHASE_PED_WALK) { p_text = "PEDESTRIAN GREEN"; p_color = bright_green; }
+        else if (sm.current_phase == PHASE_PED_BLINK) { p_text = "PEDESTRIAN FLASHING GREEN"; p_color = bright_green; }
+        else if (sm.current_phase == PHASE_PED_RED_TO_GREEN) { p_text = "PEDESTRIAN FLASHING GREEN"; p_color = bright_green; }
 
         int scale = 2;
         int margin = 2 * SSAA;
         draw_text(fb, margin, margin, v_text, v_color, scale);
         draw_text(fb, margin, margin + 10 * scale, p_text, p_color, scale);
 
-        if (sm.queued_call) {
-            draw_text(fb, margin, margin + 20 * scale, "CALL QUEUED...", bright_yellow, scale);
-        }
+        if (sm.queued_call) draw_text(fb, margin, margin + 20 * scale, "CALL QUEUED...", bright_yellow, scale);
 
-        float aspect = (float)(base_w * SSAA) / (float)(base_h * SSAA);
-        mat4_t vp = camera_view_projection(&cam, aspect);
-        for (size_t i = 0; i < scene.count; ++i) render_object(fb, &vp, &scene.objects[i], &light, base_w * SSAA, base_h * SSAA);
+        /* --- Draw Giant HUD Traffic Light OVER THE 3D SCENE --- */
+        int hud_w = 16 * SSAA;
+        int hud_h = 32 * SSAA;
+        int hud_x = fb->width - hud_w - (4 * SSAA);
+        int hud_y = (fb->height - hud_h) / 2;
+
+        draw_rect(fb, hud_x - (2*SSAA), hud_y - (2*SSAA), hud_w + (4*SSAA), hud_h + (4*SSAA), 0x222222);
+
+        int box_w = hud_w - (2*SSAA);
+        int box_h = (hud_h / 2) - (2*SSAA);
+        int top_y = hud_y + (1*SSAA);
+        draw_rect(fb, hud_x + (1*SSAA), top_y, box_w, box_h, 0x111111);
+
+        int bot_y = hud_y + (hud_h / 2) + (1*SSAA);
+        draw_rect(fb, hud_x + (1*SSAA), bot_y, box_w, box_h, 0x111111);
+
+        int icon_scale = SSAA;
+        int icon_w = 12 * icon_scale;
+        int icon_h = 12 * icon_scale;
+        int icon_x = hud_x + (hud_w - icon_w) / 2;
+
+        uint32_t current_v_color = (v_state == LIGHT_GREEN) ? bright_green : (v_state == LIGHT_YELLOW ? bright_yellow : bright_red);
+        draw_icon(fb, icon_x, top_y + (box_h - icon_h)/2, ICON_CAR, current_v_color, icon_scale);
+
+        uint32_t current_p_color = (p_state == LIGHT_GREEN) ? bright_green : bright_red;
+        draw_icon(fb, icon_x, bot_y + (box_h - icon_h)/2, ICON_PENGUIN, current_p_color, icon_scale);
 
         terminal_present(fb);
         double spent = timing_now_seconds() - now;
