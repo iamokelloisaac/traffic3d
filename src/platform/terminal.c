@@ -42,6 +42,8 @@ bool terminal_init(void) {
     g_media = ncplane_create(g_std, &nopts);
     if (!g_media) return false;
 
+    /* Force the plane to stretch to the absolute maximum terminal dimensions */
+    //ncplane_resize_max(g_media);
     ncplane_erase(g_std);
     notcurses_render(g_nc);
     return true;
@@ -109,6 +111,9 @@ unsigned terminal_poll_key(void) {
     if (id == 0) return 0;
     if (id == (uint32_t)-1) return 0;
     if (id == NCKEY_RESIZE) return 0;
+
+    /* Ignore key repeat events (holding the key down) */
+    if (ni.evtype == NCTYPE_REPEAT) return 0;
 
     if (ni.utf8[0]) return (unsigned)(unsigned char)ni.utf8[0];
     return (unsigned)id;
