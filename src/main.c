@@ -1,7 +1,7 @@
 /*
- * main.c — Entry point. Phase 6: Final HUD polish with pixel-art icons.
+ * main.c — Entry point. Phase 9: Agents, Audio, and Smooth Vector HUD.
  *
- * Commit: fix(main): render 3D scene before HUD to prevent ground occlusion
+ * Commit: feat(main): replace ASCII sprites with smooth procedural 2D icons
  *
  * Depends on: everything.
  */
@@ -9,6 +9,7 @@
 #include "traffic3d/config.h"
 #include "traffic3d/platform/terminal.h"
 #include "traffic3d/platform/timing.h"
+#include "traffic3d/platform/sound.h"
 #include "traffic3d/math/vec3.h"
 #include "traffic3d/math/mat4.h"
 #include "traffic3d/render/framebuffer.h"
@@ -61,37 +62,6 @@ static const uint8_t FONT[][5] = {
     {0x61,0x51,0x49,0x45,0x43}  /* Z */
 };
 
-/* ── 12x12 Pixel Icons for the Giant HUD ────────────────────── */
-static const char* ICON_CAR[] = {
-    "............",
-    "...XXXXXX...",
-    "..XXXXXXXX..",
-    ".XXXXXXXXXX.",
-    "XXXXXXXXXXXX",
-    "XXXXXXXXXXXX",
-    "XX.XXXXXX.XX",
-    "XX.XXXXXX.XX",
-    "............",
-    "............",
-    "............",
-    "............"
-};
-
-static const char* ICON_PENGUIN[] = {
-    "....XXXX....",
-    "...XXXXXX...",
-    "..XXXXXXXX..",
-    "..XXXXXXXX..",
-    "..XXXXXXXX..",
-    "...XXXXXX...",
-    "...XXXXXX...",
-    "...XXXXXX...",
-    "...XX..XX...",
-    "...XX..XX...",
-    "............",
-    "............"
-};
-
 static void draw_text(framebuffer_t* fb, int x, int y, const char* text, uint32_t color, int scale) {
     int cursor_x = x;
     for (int i = 0; text[i] != '\0'; i++) {
@@ -118,26 +88,63 @@ static void draw_text(framebuffer_t* fb, int x, int y, const char* text, uint32_
     }
 }
 
-static void draw_icon(framebuffer_t* fb, int x, int y, const char** icon, uint32_t color, int scale) {
-    for (int row = 0; row < 12; row++) {
-        for (int col = 0; col < 12; col++) {
-            if (icon[row][col] == 'X') {
-                for (int sy = 0; sy < scale; sy++) {
-                    for (int sx = 0; sx < scale; sx++) {
-                        framebuffer_put(fb, x + col * scale + sx, y + row * scale + sy, color);
-                    }
-                }
-            }
-        }
-    }
-}
-
+/* ── Procedural 2D Shapes for the HUD ───────────────────────── */
 static void draw_rect(framebuffer_t* fb, int x, int y, int w, int h, uint32_t color) {
     for (int j = 0; j < h; j++) {
         for (int i = 0; i < w; i++) {
             framebuffer_put(fb, x + i, y + j, color);
         }
     }
+}
+
+static void draw_circle(framebuffer_t* fb, int cx, int cy, int r, uint32_t color) {
+    for (int y = -r; y <= r; y++) {
+        for (int x = -r; x <= r; x++) {
+            if (x*x + y*y <= r*r) {
+                framebuffer_put(fb, cx + x, cy + y, color);
+            }
+        }
+    }
+}
+
+static void draw_ellipse(framebuffer_t* fb, int cx, int cy, int rx, int ry, uint32_t color) {
+    for (int y = -ry; y <= ry; y++) {
+        for (int x = -rx; x <= rx; x++) {
+            float nx = (float)x / rx;
+            float ny = (float)y / ry;
+            if (nx*nx + ny*ny <= 1.0f) {
+                framebuffer_put(fb, cx + x, cy + y, color);
+            }
+        }
+    }
+}
+
+/* Draws a smooth, recognizable car icon */
+static void draw_car_icon(framebuffer_t* fb, int cx, int cy, int s, uint32_t color) {
+    /* Main body */
+    draw_rect(fb, cx - 10*s, cy - 2*s, 20*s, 4*s, color);
+    /* Slanted cabin */
+    draw_rect(fb, cx - 6*s, cy - 4*s, 12*s, 2*s, color);
+    draw_rect(fb, cx - 4*s, cy - 6*s, 8*s, 2*s, color);
+    /* Wheels (drawn over the body in the background color) */
+    draw_circle(fb, cx - 6*s, cy + 2*s, 2*s, 0x111111);
+    draw_circle(fb, cx + 6*s, cy + 2*s, 2*s, 0x111111);
+}
+
+/* Draws a smooth, recognizable penguin icon */
+static void draw_penguin_icon(framebuffer_t* fb, int cx, int cy, int s, uint32_t color) {
+    /* Body */
+    draw_ellipse(fb, cx, cy + 2*s, 5*s, 7*s, color);
+    /* Head */
+    draw_circle(fb, cx, cy - 5*s, 4*s, color);
+    /* Feet */
+    draw_rect(fb, cx - 3*s, cy + 9*s, 2*s, 1*s, color);
+    draw_rect(fb, cx + 1*s, cy + 9*s, 2*s, 1*s, color);
+    /* Eyes */
+    draw_circle(fb, cx - 1*s, cy - 6*s, 1*s, 0x111111);
+    draw_circle(fb, cx + 1*s, cy - 6*s, 1*s, 0x111111);
+    /* Beak */
+    draw_circle(fb, cx, cy - 4*s, 1*s, 0xFFAA00);
 }
 
 /* ── Procedural Meshes ────────────────────────────────────────── */
@@ -255,6 +262,7 @@ int main(void) {
     double last = timing_now_seconds();
     bool running = true;
     light_state_t last_v_state = LIGHT_GREEN, last_p_state = LIGHT_RED;
+    double last_beep_time = 0.0;
 
     while (running) {
         unsigned key = terminal_poll_key();
@@ -267,6 +275,7 @@ int main(void) {
 
         if (key == (unsigned)cfg.key_pedestrian_call) {
             traffic_sm_press_button(&sm, &cfg, now);
+            sound_beep();
         }
 
         traffic_sm_update(&sm, dt, &cfg);
@@ -275,7 +284,19 @@ int main(void) {
         light_state_t p_state = traffic_sm_get_pedestrian_light(&sm, &cfg);
         if (v_state != last_v_state || p_state != last_p_state) {
             mesh_destroy(light_mesh); light_mesh = light_mesh_create(v_state, p_state, &cfg);
-            scene.objects[light_idx].mesh = light_mesh; last_v_state = v_state; last_p_state = p_state;
+            scene.objects[light_idx].mesh = light_mesh;
+
+            if (p_state == LIGHT_GREEN && last_p_state != LIGHT_GREEN) sound_beep();
+            if (v_state == LIGHT_RED && last_v_state != LIGHT_RED) { sound_beep(); sound_beep(); }
+
+            last_v_state = v_state; last_p_state = p_state;
+        }
+
+        if (sm.current_phase == PHASE_PED_BLINK) {
+            if (now - last_beep_time > 0.5) {
+                sound_beep();
+                last_beep_time = now;
+            }
         }
 
         for (int i = 0; i < NUM_CARS; i++) {
@@ -292,19 +313,23 @@ int main(void) {
             if (fabsf(penguins[i].position.x) > 25.0f) penguin_agent_init(&penguins[i], (i % 2 == 0) ? 1 : -1, penguins[i].object_index, &cfg, (uint32_t)(now * 1000.0f) + i);
         }
 
+        /* 1. Sky */
         fill_sky(fb, &cfg);
         framebuffer_clear_depth(fb);
 
-        /* --- Render 3D Scene FIRST --- */
+        /* 2. 3D World */
         float aspect = (float)(base_w * SSAA) / (float)(base_h * SSAA);
         mat4_t vp = camera_view_projection(&cam, aspect);
-        for (size_t i = 0; i < scene.count; ++i) render_object(fb, &vp, &scene.objects[i], &light, base_w * SSAA, base_h * SSAA);
+        for (size_t i = 0; i < scene.count; ++i) {
+            render_object(fb, &vp, &scene.objects[i], &light, base_w * SSAA, base_h * SSAA);
+        }
 
-        /* --- Draw Text HUD OVER THE 3D SCENE --- */
+        /* 3. 2D HUD OVERLAY */
         uint32_t bright_green = rgba_pack(0, 255, 0, 255);
         uint32_t bright_yellow = rgba_pack(255, 255, 0, 255);
         uint32_t bright_red = rgba_pack(255, 0, 0, 255);
 
+        /* Text HUD */
         uint32_t v_color = bright_red;
         uint32_t p_color = bright_red;
         const char* v_text = "VEHICLE RED";
@@ -322,36 +347,38 @@ int main(void) {
         int margin = 2 * SSAA;
         draw_text(fb, margin, margin, v_text, v_color, scale);
         draw_text(fb, margin, margin + 10 * scale, p_text, p_color, scale);
-
         if (sm.queued_call) draw_text(fb, margin, margin + 20 * scale, "CALL QUEUED...", bright_yellow, scale);
 
-        /* --- Draw Giant HUD Traffic Light OVER THE 3D SCENE --- */
-        int hud_w = 16 * SSAA;
-        int hud_h = 32 * SSAA;
+        /* Giant HUD Light */
+        int hud_w = 32 * SSAA;
+        int hud_h = 56 * SSAA;
         int hud_x = fb->width - hud_w - (4 * SSAA);
         int hud_y = (fb->height - hud_h) / 2;
 
         draw_rect(fb, hud_x - (2*SSAA), hud_y - (2*SSAA), hud_w + (4*SSAA), hud_h + (4*SSAA), 0x222222);
 
-        int box_w = hud_w - (2*SSAA);
+        int box_w = hud_w - (4*SSAA);
         int box_h = (hud_h / 2) - (2*SSAA);
-        int top_y = hud_y + (1*SSAA);
-        draw_rect(fb, hud_x + (1*SSAA), top_y, box_w, box_h, 0x111111);
+        int top_y = hud_y + (2*SSAA);
+        int bot_y = hud_y + (hud_h / 2) + (2*SSAA);
+        draw_rect(fb, hud_x + (2*SSAA), top_y, box_w, box_h, 0x111111);
+        draw_rect(fb, hud_x + (2*SSAA), bot_y, box_w, box_h, 0x111111);
 
-        int bot_y = hud_y + (hud_h / 2) + (1*SSAA);
-        draw_rect(fb, hud_x + (1*SSAA), bot_y, box_w, box_h, 0x111111);
-
+        /* Draw Smooth Vector Icons */
         int icon_scale = SSAA;
-        int icon_w = 12 * icon_scale;
-        int icon_h = 12 * icon_scale;
-        int icon_x = hud_x + (hud_w - icon_w) / 2;
 
-        uint32_t current_v_color = (v_state == LIGHT_GREEN) ? bright_green : (v_state == LIGHT_YELLOW ? bright_yellow : bright_red);
-        draw_icon(fb, icon_x, top_y + (box_h - icon_h)/2, ICON_CAR, current_v_color, icon_scale);
+        /* Car */
+        int cx = hud_x + hud_w/2;
+        int cy = top_y + box_h/2;
+        uint32_t car_color = (v_state == LIGHT_GREEN) ? bright_green : ((v_state == LIGHT_YELLOW) ? bright_yellow : bright_red);
+        draw_car_icon(fb, cx, cy, icon_scale, car_color);
 
-        uint32_t current_p_color = (p_state == LIGHT_GREEN) ? bright_green : bright_red;
-        draw_icon(fb, icon_x, bot_y + (box_h - icon_h)/2, ICON_PENGUIN, current_p_color, icon_scale);
+        /* Penguin */
+        cy = bot_y + box_h/2;
+        uint32_t pen_color = (p_state == LIGHT_GREEN) ? bright_green : bright_red;
+        draw_penguin_icon(fb, cx, cy, icon_scale, pen_color);
 
+        /* Present */
         terminal_present(fb);
         double spent = timing_now_seconds() - now;
         if (spent < target_dt) timing_sleep_seconds(target_dt - spent);

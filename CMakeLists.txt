@@ -44,6 +44,7 @@ add_executable(traffic3d
         src/agents/penguin_agent.c     # <-- NEW
         src/platform/terminal.c
         src/platform/timing.c
+        src/platform/sound.c
 )
 
 target_include_directories(traffic3d PRIVATE
