@@ -10,30 +10,22 @@ void traffic_sm_init(traffic_sm_t* sm) {
     sm->elapsed_in_phase = 0.0;
     sm->pedestrian_call_pending = false;
     sm->queued_call = false;
+    sm->last_press_time = -100.0; /* Set far in the past */
 }
 
-void traffic_sm_press_button(traffic_sm_t* sm, const config_t* cfg) {
-    if (sm->current_phase == PHASE_PED_WALK || sm->current_phase == PHASE_PED_BLINK) {
-        double remaining_walk = 0.0;
-        if (sm->current_phase == PHASE_PED_WALK) {
-            remaining_walk = cfg->pedestrian_walk_seconds - sm->elapsed_in_phase;
-            remaining_walk += cfg->pedestrian_blink_seconds; 
-        } else {
-            remaining_walk = cfg->pedestrian_blink_seconds - sm->elapsed_in_phase;
-        }
-        double min_time_needed = cfg->min_crossing_time_seconds + cfg->safety_margin_seconds;
+void traffic_sm_press_button(traffic_sm_t* sm, const config_t* cfg, double current_time) {
+    (void)cfg;
 
-        if (cfg->allow_mid_walk_join && remaining_walk >= min_time_needed) {
-            return; 
-        } else {
-            sm->queued_call = true;
-            return;
-        }
-    }
+    /* 1. Debounce: Ignore presses within 0.3 seconds of the last press */
+    if (current_time - sm->last_press_time < 0.3) return;
+    sm->last_press_time = current_time;
 
+    /* 2. Explicit Queue Logic */
     if (sm->current_phase == PHASE_STEADY_GREEN) {
+        /* First press: Start the sequence immediately. DO NOT queue. */
         sm->pedestrian_call_pending = true;
     } else {
+        /* Multi-press during a cycle: Explicitly queue for later. */
         sm->queued_call = true;
     }
 }
@@ -43,10 +35,14 @@ void traffic_sm_update(traffic_sm_t* sm, double dt, const config_t* cfg) {
 
     switch (sm->current_phase) {
         case PHASE_STEADY_GREEN:
-            if (sm->pedestrian_call_pending || sm->queued_call) {
+            if (sm->pedestrian_call_pending) {
                 sm->current_phase = PHASE_CALL_DELAY;
                 sm->elapsed_in_phase = 0.0;
                 sm->pedestrian_call_pending = false;
+            } else if (sm->queued_call && sm->elapsed_in_phase >= cfg->queued_call_delay_seconds) {
+                /* The wait time is over, trigger the batched queue */
+                sm->current_phase = PHASE_CALL_DELAY;
+                sm->elapsed_in_phase = 0.0;
                 sm->queued_call = false;
             }
             break;
