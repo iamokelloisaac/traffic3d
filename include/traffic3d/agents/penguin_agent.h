@@ -29,6 +29,5 @@ typedef struct {
 } penguin_agent_t;
 
 void penguin_agent_init(penguin_agent_t* p, int direction, size_t obj_idx, const config_t* cfg, uint32_t seed);
-void penguin_agent_update(penguin_agent_t* p, double dt, light_state_t light);
-
+void penguin_agent_update(penguin_agent_t* p, double dt, bool is_walk_phase);
 #endif
