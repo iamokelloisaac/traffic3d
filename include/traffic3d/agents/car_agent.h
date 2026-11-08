@@ -9,7 +9,6 @@
 #include "traffic3d/common.h"
 #include "traffic3d/config.h"
 #include "traffic3d/math/vec3.h"
-#include "traffic3d/traffic/state_machine.h"
 
 typedef struct {
     vec3_t position;

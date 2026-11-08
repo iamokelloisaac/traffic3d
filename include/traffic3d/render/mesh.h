@@ -24,7 +24,7 @@ typedef struct {
     size_t      capacity;
 } mesh_t;
 
-mesh_t* mesh_create(void);
+mesh_t* mesh_create();
 void    mesh_destroy(mesh_t* m);
 
 /* Append one triangle. Color is passed as a 0xRRGGBB value. */

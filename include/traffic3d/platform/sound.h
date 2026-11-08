@@ -10,6 +10,6 @@
 #define TRAFFIC3D_PLATFORM_SOUND_H
 
 /* Plays a single terminal bell beep. */
-void sound_beep(void);
+void sound_beep();
 
 #endif

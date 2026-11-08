@@ -24,8 +24,8 @@
 
 #include "traffic3d/render/framebuffer.h"
 
-bool terminal_init(void);
-void terminal_shutdown(void);
+bool terminal_init();
+void terminal_shutdown();
 
 /* Framebuffer dimensions recommended for this terminal. */
 void terminal_framebuffer_size(int* out_width, int* out_height);
@@ -34,6 +34,6 @@ void terminal_framebuffer_size(int* out_width, int* out_height);
 void terminal_present(const framebuffer_t* fb);
 
 /* Poll for a key. Returns 0 if none, otherwise the Unicode codepoint. */
-unsigned terminal_poll_key(void);
+unsigned terminal_poll_key();
 
 #endif

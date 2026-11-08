@@ -22,7 +22,7 @@
 typedef struct { float m[16]; } mat4_t;
 
 /* Identity */
-mat4_t mat4_identity(void);
+mat4_t mat4_identity();
 
 /* Multiplication: result = a * b. Applies b first to a column vector. */
 mat4_t mat4_mul(mat4_t a, mat4_t b);

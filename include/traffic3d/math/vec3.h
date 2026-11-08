@@ -13,7 +13,7 @@ typedef struct { float x, y, z; } vec3_t;
 
 /* Constructors */
 vec3_t vec3(float x, float y, float z);
-vec3_t vec3_zero(void);
+vec3_t vec3_zero();
 
 /* Arithmetic */
 vec3_t vec3_add   (vec3_t a, vec3_t b);

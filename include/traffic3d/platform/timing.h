@@ -10,7 +10,7 @@
 #define TRAFFIC3D_PLATFORM_TIMING_H
 
 /* Seconds since an arbitrary monotonic origin. Never goes backwards. */
-double timing_now_seconds(void);
+double timing_now_seconds();
 
 /* Sleep for at least `seconds`. Safe with values <0 (no-op). */
 void timing_sleep_seconds(double seconds);
