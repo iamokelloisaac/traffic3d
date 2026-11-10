@@ -33,15 +33,15 @@ add_executable(traffic3d
         src/render/rasterizer.c
         src/render/camera.c
         src/render/lighting.c
-        src/scene/object.c           # ← THIS LINE WAS MISSING
+        src/scene/object.c
         src/scene/scene.c
         src/geometry/primitives.c
-        src/geometry/road_mesh.c      # <-- NEW
-        src/geometry/light_mesh.c     # <-- NEW
-        src/traffic/state_machine.c   # <-- NEW
-        src/agents/personality.c       # <-- NEW
-        src/agents/car_agent.c         # <-- NEW
-        src/agents/penguin_agent.c     # <-- NEW
+        src/geometry/road_mesh.c
+        src/geometry/light_mesh.c
+        src/traffic/state_machine.c
+        src/agents/personality.c
+        src/agents/car_agent.c
+        src/agents/penguin_agent.c
         src/platform/terminal.c
         src/platform/timing.c
         src/platform/sound.c

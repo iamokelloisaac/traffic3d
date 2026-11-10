@@ -33,7 +33,7 @@ typedef struct {
 } lighting_t;
 
 /* Sensible defaults: warm key, cool fill, gentle ambient. */
-lighting_t lighting_default(void);
+lighting_t lighting_default();
 
 /* Apply shading to a triangle color given its face normal. */
 uint32_t lighting_shade(const lighting_t* l, vec3_t normal, uint32_t base_rgb24);
